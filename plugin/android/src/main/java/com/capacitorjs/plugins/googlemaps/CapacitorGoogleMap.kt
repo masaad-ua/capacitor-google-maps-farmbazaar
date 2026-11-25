@@ -1,5 +1,6 @@
 package com.capacitorjs.plugins.googlemaps
 
+import android.util.Base64
 import android.annotation.SuppressLint
 import android.graphics.*
 import android.location.Location
@@ -867,31 +868,52 @@ class CapacitorGoogleMap(
             markerOptions.anchor(marker.iconAnchor!!.x, marker.iconAnchor!!.y)
         }
 
-
         if (!marker.iconUrl.isNullOrEmpty()) {
-            if (this.markerIcons.contains(marker.iconUrl)) {
-                val cachedBitmap = this.markerIcons[marker.iconUrl]
+            val iconUrl = marker.iconUrl!!
+
+            if (this.markerIcons.contains(iconUrl)) {
+                val cachedBitmap = this.markerIcons[iconUrl]
                 markerOptions.icon(getResizedIcon(cachedBitmap!!, marker))
             } else {
                 try {
-                    var stream: InputStream? = null
-                    if (marker.iconUrl!!.startsWith("https:")) {
-                        stream = URL(marker.iconUrl).openConnection().getInputStream()
+                    val bitmap = if (iconUrl.startsWith("data:image/")) {
+                        val base64Index = iconUrl.indexOf("base64,")
+
+                        if (base64Index == -1) {
+                            throw IllegalArgumentException("Invalid Base64 image")
+                        }
+
+                        val base64 = iconUrl.substring(base64Index + 7)
+                        val bytes = Base64.decode(base64, Base64.DEFAULT)
+
+                        BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                            ?: throw IllegalArgumentException("Could not decode image")
                     } else {
-                        stream = this.delegate.context.assets.open("public/${marker.iconUrl}")
+                        val stream: InputStream =
+                            if (iconUrl.startsWith("https:")) {
+                                URL(iconUrl).openConnection().getInputStream()
+                            } else {
+                                this.delegate.context.assets.open("public/$iconUrl")
+                            }
+
+                        stream.use {
+                            BitmapFactory.decodeStream(it)
+                                ?: throw IllegalArgumentException("Could not decode image")
+                        }
                     }
-                    var bitmap = BitmapFactory.decodeStream(stream)
-                    this.markerIcons[marker.iconUrl!!] = bitmap
+
+                    this.markerIcons[iconUrl] = bitmap
                     markerOptions.icon(getResizedIcon(bitmap, marker))
                 } catch (e: Exception) {
                     var detailedMessage = "${e.javaClass} - ${e.localizedMessage}"
-                    if (marker.iconUrl!!.endsWith(".svg")) {
+
+                    if (iconUrl.endsWith(".svg")) {
                         detailedMessage = "SVG not supported"
                     }
 
                     Log.w(
-                            "CapacitorGoogleMaps",
-                            "Could not load image '${marker.iconUrl}': ${detailedMessage}. Using default marker icon."
+                        "CapacitorGoogleMaps",
+                        "Could not load image '$iconUrl': ${detailedMessage}. Using default marker icon."
                     )
                 }
             }
